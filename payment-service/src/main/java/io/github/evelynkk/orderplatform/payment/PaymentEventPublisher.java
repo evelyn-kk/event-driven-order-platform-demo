@@ -1,5 +1,6 @@
 package io.github.evelynkk.orderplatform.payment;
 
+import io.github.evelynkk.orderplatform.events.DomainEvent;
 import io.github.evelynkk.orderplatform.events.PaymentCompletedEvent;
 import io.github.evelynkk.orderplatform.events.PaymentFailedEvent;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,8 @@ public class PaymentEventPublisher {
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
     public void publishPaymentCompleted(String orderId, String userId, BigDecimal amount) {
-        PaymentCompletedEvent event = new PaymentCompletedEvent(orderId, userId, UUID.randomUUID().toString(), amount, Instant.now());
+        PaymentCompletedEvent event = new PaymentCompletedEvent(
+                DomainEvent.newEventId(), orderId, userId, UUID.randomUUID().toString(), amount, Instant.now());
         kafkaTemplate.send("payment.completed", orderId, event)
                 .whenComplete((result, ex) -> {
                     if (ex == null) {
@@ -31,7 +33,8 @@ public class PaymentEventPublisher {
     }
 
     public void publishPaymentFailed(String orderId, String userId, BigDecimal amount, String reason) {
-        PaymentFailedEvent event = new PaymentFailedEvent(orderId, userId, amount, reason, Instant.now());
+        PaymentFailedEvent event = new PaymentFailedEvent(
+                DomainEvent.newEventId(), orderId, userId, amount, reason, Instant.now());
         kafkaTemplate.send("payment.failed", orderId, event)
                 .whenComplete((result, ex) -> {
                     if (ex == null) {

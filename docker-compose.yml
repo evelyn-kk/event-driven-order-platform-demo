@@ -45,6 +45,27 @@ services:
         wait
       "
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: event-driven-order-platform-postgres
+    hostname: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+      POSTGRES_DB: postgres
+    volumes:
+      - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - event-driven-order-platform-network
+
   schema-registry:
     image: confluentinc/cp-schema-registry:7.6.0
     container_name: event-driven-order-platform-schema-registry
@@ -78,3 +99,6 @@ services:
 networks:
   event-driven-order-platform-network:
     driver: bridge
+
+volumes:
+  postgres-data:

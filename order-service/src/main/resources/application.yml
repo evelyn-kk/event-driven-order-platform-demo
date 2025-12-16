@@ -1,23 +1,51 @@
 spring:
   application:
     name: order-service
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/order_service
+    username: ${POSTGRES_USER:platform}
+    password: ${POSTGRES_PASSWORD:platform}
+    hikari:
+      # The listener container threads and the outbox relay all draw from this pool; sizing it
+      # below the number of concurrent consumers would make them queue on connections.
+      maximum-pool-size: 16
+
+  jpa:
+    # Flyway owns the schema. Hibernate only checks that the mapping still matches it, so a
+    # forgotten migration fails at startup instead of at the first write.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/common,classpath:db/migration/order
+
   kafka:
-    bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
-        max.in.flight.requests.per.connection: 5
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: ${spring.application.name}
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Offsets are committed by the container after the handler returns, not by a background
+      # timer, so a crash mid-handler replays the record rather than skipping it.
+      enable-auto-commit: false
       properties:
         spring.json.trusted.packages: io.github.evelynkk.orderplatform.events
+    listener:
+      ack-mode: record
+
+platform:
+  outbox:
+    poll-interval-ms: 200
+    batch-size: 200
 
 server:
   port: 8081

@@ -7,6 +7,8 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.kafka.KafkaConnectionDetails;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -51,13 +53,14 @@ public class OutboxRelay {
     public OutboxRelay(OutboxRepository repository,
                        OutboxProperties properties,
                        KafkaProperties kafkaProperties,
+                       ObjectProvider<KafkaConnectionDetails> connectionDetails,
                        PlatformTransactionManager transactionManager) {
         this.repository = repository;
         this.properties = properties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
 
         Map<String, Object> config = new HashMap<>();
-        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaProperties.getBootstrapServers());
+        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, resolveBootstrapServers(kafkaProperties, connectionDetails));
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
         // acks=all plus idempotence means a broker-side retry cannot duplicate or reorder a
@@ -68,6 +71,21 @@ public class OutboxRelay {
         config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
         this.producerFactory = new DefaultKafkaProducerFactory<>(config);
         this.kafkaTemplate = new KafkaTemplate<>(producerFactory);
+    }
+
+    /**
+     * Prefers {@link KafkaConnectionDetails} over the raw property.
+     *
+     * <p>Anything that supplies the broker address dynamically — Testcontainers via
+     * {@code @ServiceConnection}, Docker Compose support, a service binding in a deployment —
+     * contributes a connection-details bean and leaves {@code spring.kafka.bootstrap-servers} at
+     * its default. Reading the property alone would silently point the relay at localhost while
+     * every other Kafka client in the process talked to the real broker.
+     */
+    private static List<String> resolveBootstrapServers(KafkaProperties kafkaProperties,
+                                                        ObjectProvider<KafkaConnectionDetails> connectionDetails) {
+        KafkaConnectionDetails details = connectionDetails.getIfAvailable();
+        return details != null ? details.getBootstrapServers() : kafkaProperties.getBootstrapServers();
     }
 
     @Scheduled(fixedDelayString = "${platform.outbox.poll-interval-ms:200}")

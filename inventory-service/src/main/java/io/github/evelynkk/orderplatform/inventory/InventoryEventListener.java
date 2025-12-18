@@ -1,48 +1,46 @@
 package io.github.evelynkk.orderplatform.inventory;
 
+import io.github.evelynkk.orderplatform.events.OrderCancelledEvent;
 import io.github.evelynkk.orderplatform.events.OrderCreatedEvent;
-import io.github.evelynkk.orderplatform.events.PaymentFailedEvent;
+import io.github.evelynkk.orderplatform.events.ShippingCreatedEvent;
+import io.github.evelynkk.orderplatform.messaging.idempotency.IdempotentEventProcessor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
+/**
+ * Deduplication matters most here. Reserving stock is not naturally idempotent — applying the same
+ * {@code order.created} twice would hold twice the stock and leak the difference forever, since
+ * only one release ever arrives.
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class InventoryEventListener {
 
-    private final InventoryEventPublisher publisher;
+    static final String GROUP = "inventory-service";
 
-    // Simulated inventory storage
-    private final Map<String, Integer> stock = new ConcurrentHashMap<>();
+    private final InventoryService inventory;
+    private final IdempotentEventProcessor idempotency;
 
-    @KafkaListener(topics = "order.created", groupId = "inventory-service")
+    @KafkaListener(topics = "order.created", groupId = GROUP)
     public void onOrderCreated(OrderCreatedEvent event) {
-        log.info("Received order.created for orderId={}, productId={}, quantity={}",
-                event.orderId(), event.productId(), event.quantity());
-
-        int available = stock.computeIfAbsent(event.productId(), k -> 100);
-
-        if (event.quantity() > available) {
-            log.warn("Insufficient stock for orderId={}, requested={}, available={}",
-                    event.orderId(), event.quantity(), available);
-            publisher.publishInventoryInsufficient(event.orderId(), event.productId(), event.quantity(), available);
-        } else {
-            int remaining = available - event.quantity();
-            stock.put(event.productId(), remaining);
-            log.info("Stock deducted for orderId={}, remaining={}", event.orderId(), remaining);
-            publisher.publishInventoryDeducted(event.orderId(), event.productId(), event.quantity(), remaining);
-        }
+        idempotency.processOnce(event.eventId(), GROUP, () -> inventory.reserve(event));
     }
 
-    @KafkaListener(topics = "payment.failed", groupId = "inventory-service-compensation")
-    public void onPaymentFailed(PaymentFailedEvent event) {
-        log.warn("Received payment.failed for orderId={}. Compensating: releasing stock (simulated).", event.orderId());
-        // In production: look up reserved quantity by orderId and restore stock.
-        // Here we only log because the demo does not persist reservations.
+    /**
+     * Compensation. Driven by {@code order.cancelled} rather than {@code payment.failed} so that
+     * every cancellation path releases stock through one route — payment failure is only one of
+     * the ways an order can end.
+     */
+    @KafkaListener(topics = "order.cancelled", groupId = GROUP)
+    public void onOrderCancelled(OrderCancelledEvent event) {
+        idempotency.processOnce(event.eventId(), GROUP, () -> inventory.release(event.orderId()));
+    }
+
+    @KafkaListener(topics = "shipping.created", groupId = GROUP)
+    public void onShippingCreated(ShippingCreatedEvent event) {
+        idempotency.processOnce(event.eventId(), GROUP, () -> inventory.commit(event.orderId()));
     }
 }

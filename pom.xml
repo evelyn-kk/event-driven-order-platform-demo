@@ -15,6 +15,7 @@
 
     <modules>
         <module>platform-events</module>
+        <module>order-service</module>
     </modules>
 
     <properties>

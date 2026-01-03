@@ -20,6 +20,7 @@
         <module>payment-service</module>
         <module>shipping-service</module>
         <module>notification-service</module>
+        <module>analytics-service</module>
     </modules>
 
     <properties>

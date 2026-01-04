@@ -1,0 +1,156 @@
+version: '3.8'
+
+# This compose file runs the pre-built GitHub Container Registry images.
+# Set DOCKER_IMAGE_OWNER to your GitHub username/org before running:
+#   export DOCKER_IMAGE_OWNER=evelyn-kk
+#   docker compose -f docker-compose.images.yml up -d
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: event-driven-order-platform-zookeeper
+    hostname: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - event-driven-order-platform-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: event-driven-order-platform-kafka
+    hostname: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    networks:
+      - event-driven-order-platform-network
+    volumes:
+      - ./init-kafka-topics.sh:/init-kafka-topics.sh
+    command: >
+      bash -c "
+        /etc/confluent/docker/run &
+        sleep 10;
+        /init-kafka-topics.sh;
+        wait
+      "
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: event-driven-order-platform-schema-registry
+    hostname: schema-registry
+    depends_on:
+      - kafka
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    networks:
+      - event-driven-order-platform-network
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: event-driven-order-platform-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    networks:
+      - event-driven-order-platform-network
+
+  order-service:
+    image: ghcr.io/${DOCKER_IMAGE_OWNER:-evelyn-kk}/event-driven-order-platform-order-service:latest
+    container_name: event-driven-order-platform-order-service
+    depends_on:
+      - kafka
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - event-driven-order-platform-network
+
+  inventory-service:
+    image: ghcr.io/${DOCKER_IMAGE_OWNER:-evelyn-kk}/event-driven-order-platform-inventory-service:latest
+    container_name: event-driven-order-platform-inventory-service
+    depends_on:
+      - kafka
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - event-driven-order-platform-network
+
+  payment-service:
+    image: ghcr.io/${DOCKER_IMAGE_OWNER:-evelyn-kk}/event-driven-order-platform-payment-service:latest
+    container_name: event-driven-order-platform-payment-service
+    depends_on:
+      - kafka
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - event-driven-order-platform-network
+
+  shipping-service:
+    image: ghcr.io/${DOCKER_IMAGE_OWNER:-evelyn-kk}/event-driven-order-platform-shipping-service:latest
+    container_name: event-driven-order-platform-shipping-service
+    depends_on:
+      - kafka
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - event-driven-order-platform-network
+
+  notification-service:
+    image: ghcr.io/${DOCKER_IMAGE_OWNER:-evelyn-kk}/event-driven-order-platform-notification-service:latest
+    container_name: event-driven-order-platform-notification-service
+    depends_on:
+      - kafka
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - event-driven-order-platform-network
+
+  analytics-service:
+    image: ghcr.io/${DOCKER_IMAGE_OWNER:-evelyn-kk}/event-driven-order-platform-analytics-service:latest
+    container_name: event-driven-order-platform-analytics-service
+    depends_on:
+      - kafka
+    ports:
+      - "8086:8086"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - event-driven-order-platform-network
+
+networks:
+  event-driven-order-platform-network:
+    driver: bridge

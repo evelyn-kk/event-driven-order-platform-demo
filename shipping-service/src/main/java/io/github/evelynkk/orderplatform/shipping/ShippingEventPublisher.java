@@ -1,5 +1,6 @@
 package io.github.evelynkk.orderplatform.shipping;
 
+import io.github.evelynkk.orderplatform.events.DomainEvent;
 import io.github.evelynkk.orderplatform.events.ShippingCreatedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,7 @@ public class ShippingEventPublisher {
 
     public void publishShippingCreated(String orderId) {
         ShippingCreatedEvent event = new ShippingCreatedEvent(
+                DomainEvent.newEventId(),
                 orderId,
                 UUID.randomUUID().toString(),
                 "SF-Express",

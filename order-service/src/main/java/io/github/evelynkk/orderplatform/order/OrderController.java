@@ -1,5 +1,6 @@
 package io.github.evelynkk.orderplatform.order;
 
+import io.github.evelynkk.orderplatform.events.DomainEvent;
 import io.github.evelynkk.orderplatform.events.OrderCreatedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ public class OrderController {
         }
 
         OrderCreatedEvent event = new OrderCreatedEvent(
+                DomainEvent.newEventId(),
                 orderId,
                 request.userId(),
                 request.productId(),

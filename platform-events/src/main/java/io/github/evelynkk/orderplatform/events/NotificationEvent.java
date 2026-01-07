@@ -5,10 +5,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 
 public record NotificationEvent(
+        @JsonProperty("eventId") String eventId,
+        @JsonProperty("orderId") String orderId,
         @JsonProperty("recipientId") String recipientId,
         @JsonProperty("channel") String channel,
         @JsonProperty("subject") String subject,
         @JsonProperty("content") String content,
         @JsonProperty("occurredAt") Instant occurredAt
-) {
+) implements DomainEvent {
 }

@@ -15,6 +15,7 @@
 
     <modules>
         <module>platform-events</module>
+        <module>platform-messaging</module>
         <module>order-service</module>
         <module>inventory-service</module>
         <module>payment-service</module>
@@ -43,6 +44,11 @@
             <dependency>
                 <groupId>io.github.evelynkk</groupId>
                 <artifactId>platform-events</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.evelynkk</groupId>
+                <artifactId>platform-messaging</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

@@ -30,10 +30,35 @@
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-boot.version>3.2.12</spring-boot.version>
+        <!--
+          Ahead of the version Spring Boot 3.2 manages. The bundled docker-java negotiates Docker
+          API 1.32, which Docker Engine 25+ refuses; 1.20.x speaks 1.41 and works against both old
+          CI daemons and current local ones.
+        -->
+        <testcontainers.version>1.20.6</testcontainers.version>
+        <!--
+          Docker Engine 25+ rejects the API version docker-java negotiates by default (1.32), so
+          integration tests cannot reach the daemon without being told which version to speak.
+          Override with -Ddocker.api.version=... against an older daemon.
+        -->
+        <docker.api.version>1.43</docker.api.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!--
+              Declared before spring-boot-dependencies on purpose. Maven resolves an imported BOM
+              with the properties of the POM that declares it, so overriding Boot's
+              testcontainers.version has no effect; importing the newer BOM first does, because the
+              first declaration of a managed dependency wins.
+            -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -64,5 +89,17 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <api.version>${docker.api.version}</api.version>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
     </build>
 </project>

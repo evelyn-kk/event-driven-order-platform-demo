@@ -161,9 +161,23 @@ keeps per-order ordering intact as consumers scale out.
 
 ## Tests
 
+Integration tests run against real Postgres and Kafka via Testcontainers, so a Docker daemon must
+be reachable:
+
 ```bash
 mvn clean verify
 ```
+
+On Colima, point Testcontainers at its socket first:
+
+```bash
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+```
+
+The build pins the Docker API version it negotiates (`docker.api.version`, default `1.43`) because
+docker-java's default of 1.32 is rejected by Docker Engine 25 and newer. Override it with
+`-Ddocker.api.version=...` against an older daemon.
 
 ---
 
@@ -185,11 +199,13 @@ ghcr.io/evelyn-kk/event-driven-order-platform-<service>:latest
 
 Work in progress, in order:
 
-- [ ] PostgreSQL-backed order state machine and inventory reservations
-- [ ] Transactional outbox to close the write-database-then-publish gap
-- [ ] Consumer-side deduplication for effectively-once processing
+- [x] PostgreSQL-backed order state machine
+- [x] Transactional outbox to close the write-database-then-publish gap
+- [x] Consumer-side deduplication for effectively-once processing
+- [ ] Inventory reservations with a compensating release
+- [ ] Payment and shipping persistence
 - [ ] Tiered retry with exponential backoff, DLQ routing, and a replay endpoint
-- [ ] Testcontainers end-to-end coverage: duplicate delivery, saga rollback, dead lettering
+- [ ] Testcontainers coverage across every service
 - [ ] Micrometer → Prometheus → Grafana: consumer lag, end-to-end latency, throughput
 - [ ] Load-test harness and a documented tuning baseline
 

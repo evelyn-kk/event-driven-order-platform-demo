@@ -16,22 +16,33 @@ containment** — not CRUD.
 
 ```
 POST /orders
-  └── order-service publishes order.created
-        ├── inventory-service reserves stock
-        │     ├── enough    → inventory.deducted
-        │     └── not enough → inventory.insufficient ─┐
-        ├── payment-service charges the order          │
-        │     ├── success → payment.completed          │
-        │     └── failure → payment.failed ────────────┤
-        │                                              │
-        └── shipping-service (on payment.completed) → shipping.created
-                                                       │
-   order-service consumes the two failure events ──────┘
-        └── publishes order.cancelled, driving compensation
+  └── order-service            writes the order, appends order.created to its outbox
+        │
+        ▼
+      inventory-service        reserves stock against a row lock
+        ├── enough      → inventory.deducted
+        └── not enough  → inventory.insufficient ──────────────┐
+                │                                              │
+                ▼                                              │
+      payment-service          charges the amount it recorded  │
+        ├── approved    → payment.completed                    │
+        └── declined    → payment.failed ──────────────────────┤
+                │                                              │
+                ▼                                              ▼
+      shipping-service                            order-service cancels the order
+        └── shipping.created                        └── order.cancelled
+                │                                              │
+                ▼                                              ▼
+      inventory commits the hold              inventory releases the hold,
+      order-service marks it SHIPPED          payment refunds if it had charged
 
 notification-service  fans out customer notifications
 analytics-service     tails every topic for downstream analytics
 ```
+
+The steps are deliberately serial. Charging in parallel with the stock check — the obvious way to
+cut latency — means taking money for orders that turn out to be unfulfillable, and leaves the
+order's own state machine with no linear order to enforce.
 
 ---
 
@@ -44,7 +55,11 @@ analytics-service     tails every topic for downstream analytics
 | **Isolation** | Each service owns its own consumer group; a slow analytics consumer cannot stall fulfillment |
 | **Producer durability** | `acks=all` + `enable.idempotence=true` to survive broker retries without duplicating records |
 | **Event contracts** | Shared `platform-events` module of Java records; Spring Kafka's `__TypeId__` header drives typed deserialization |
-| **Compensation** | Failure events (`inventory.insufficient`, `payment.failed`) drive a cancellation path rather than a distributed lock or 2PC |
+| **Dual-write consistency** | Business state and the resulting event commit in one transaction via a [transactional outbox](platform-messaging/src/main/java/io/github/evelynkk/orderplatform/messaging/outbox/OutboxRecorder.java); a relay publishes afterwards |
+| **Duplicate delivery** | Consumers commit an `(eventId, consumerGroup)` marker alongside their business write, making redelivery a no-op |
+| **Compensation** | `order.cancelled` drives every rollback path: inventory releases its hold, payment refunds a completed charge |
+| **Contention on hot keys** | Stock reservation takes a `SELECT … FOR UPDATE` row lock rather than retrying an optimistic version, which collapses under a promoted SKU |
+| **Service data ownership** | payment-service copies the order amount from `order.created` instead of calling back into order-service, so no service needs another to be up |
 
 ---
 
@@ -202,8 +217,8 @@ Work in progress, in order:
 - [x] PostgreSQL-backed order state machine
 - [x] Transactional outbox to close the write-database-then-publish gap
 - [x] Consumer-side deduplication for effectively-once processing
-- [ ] Inventory reservations with a compensating release
-- [ ] Payment and shipping persistence
+- [x] Inventory reservations with a compensating release
+- [x] Payment and shipping persistence
 - [ ] Tiered retry with exponential backoff, DLQ routing, and a replay endpoint
 - [ ] Testcontainers coverage across every service
 - [ ] Micrometer → Prometheus → Grafana: consumer lag, end-to-end latency, throughput
@@ -211,7 +226,8 @@ Work in progress, in order:
 
 ### Known limitations at this commit
 
-Business logic in the inventory, payment, shipping, notification, and analytics services is
-simulated in memory. Nothing is persisted yet, so compensation currently logs its intent rather
-than restoring state. The Schema Registry container is provisioned but not yet wired up —
-serialization is JSON. The roadmap above closes each of these.
+Payment approval is a threshold check rather than a call to a provider, and shipment creation
+generates a tracking number rather than booking a courier — the surrounding transactional and
+compensating behaviour is real, the external integrations are not. notification-service and
+analytics-service remain stateless log consumers. The Schema Registry container is provisioned but
+not yet wired up; serialization is JSON with a `__TypeId__` header.

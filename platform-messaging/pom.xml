@@ -43,6 +43,16 @@
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
+        <!--
+          Optional: the dead-letter admin endpoints only exist in services that run a web server,
+          and the controller is conditional on one. Keeping this non-transitive means a
+          headless consumer that depends on this module does not inherit an HTTP stack.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

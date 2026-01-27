@@ -3,6 +3,7 @@ package io.github.evelynkk.orderplatform.order;
 import io.github.evelynkk.orderplatform.events.DomainEvent;
 import io.github.evelynkk.orderplatform.events.OrderCancelledEvent;
 import io.github.evelynkk.orderplatform.events.OrderCreatedEvent;
+import io.github.evelynkk.orderplatform.messaging.dlq.PermanentEventException;
 import io.github.evelynkk.orderplatform.messaging.outbox.OutboxRecorder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -93,9 +94,10 @@ public class OrderService {
     }
 
     private Order require(String orderId) {
-        // Throwing lets the listener's retry policy handle the case where this service is somehow
-        // behind its own outbox; a genuinely unknown order eventually lands in the DLQ for triage.
+        // Permanent, not transient: this service writes the order in the same transaction that
+        // announces it, so an event referencing an order it has never seen describes a state that
+        // will never exist. Retrying would stall the partition; the DLQ is where it belongs.
         return orders.findById(orderId)
-                .orElseThrow(() -> new IllegalStateException("Unknown order " + orderId));
+                .orElseThrow(() -> new PermanentEventException("Unknown order " + orderId));
     }
 }

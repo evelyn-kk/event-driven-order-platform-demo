@@ -3,6 +3,7 @@ package io.github.evelynkk.orderplatform.order;
 import io.github.evelynkk.orderplatform.events.DomainEvent;
 import io.github.evelynkk.orderplatform.events.InventoryDeductedEvent;
 import io.github.evelynkk.orderplatform.events.PaymentFailedEvent;
+import io.github.evelynkk.orderplatform.messaging.dlq.DeadLetter;
 import io.github.evelynkk.orderplatform.messaging.idempotency.ProcessedEventRepository;
 import io.github.evelynkk.orderplatform.messaging.outbox.OutboxRepository;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -35,9 +36,11 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -64,6 +67,9 @@ class OrderSagaIntegrationTest {
 
     private static KafkaTemplate<String, Object> upstream;
 
+    /** Writes plain strings, used to plant a record the consumer cannot deserialize. */
+    private static KafkaTemplate<String, String> poison;
+
     @Autowired
     private TestRestTemplate rest;
 
@@ -85,6 +91,10 @@ class OrderSagaIntegrationTest {
             // JsonSerializer stamps __TypeId__, matching what the outbox relay emits in production.
             config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
             upstream = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(config));
+
+            Map<String, Object> plain = new HashMap<>(config);
+            plain.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+            poison = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(plain));
         }
     }
 
@@ -92,6 +102,9 @@ class OrderSagaIntegrationTest {
     static void closeProducer() {
         if (upstream != null) {
             upstream.destroy();
+        }
+        if (poison != null) {
+            poison.destroy();
         }
     }
 
@@ -103,9 +116,11 @@ class OrderSagaIntegrationTest {
         assertThat(stored.getStatus()).isEqualTo(OrderStatus.CREATED);
 
         // The relay drains asynchronously, so the row lands first and the Kafka record follows.
-        List<String> published = await().atMost(Duration.ofSeconds(30))
-                .until(() -> consume("order.created"), records -> !records.isEmpty());
-        assertThat(published).anyMatch(payload -> payload.contains(orderId));
+        // Wait for this order specifically: other tests in the class publish to the same topic,
+        // so "some record arrived" would pass without proving anything about this one.
+        await().atMost(Duration.ofSeconds(30)).until(
+                () -> consume("order.created"),
+                records -> records.stream().anyMatch(payload -> payload.contains(orderId)));
 
         await().atMost(Duration.ofSeconds(30))
                 .untilAsserted(() -> assertThat(outbox.countByPublishedAtIsNull()).isZero());
@@ -157,9 +172,9 @@ class OrderSagaIntegrationTest {
                 .startsWith("PAYMENT_FAILED");
 
         // Cancellation has to reach the other participants; that is what releases the stock.
-        List<String> cancellations = await().atMost(Duration.ofSeconds(30))
-                .until(() -> consume("order.cancelled"), records -> !records.isEmpty());
-        assertThat(cancellations).anyMatch(payload -> payload.contains(orderId));
+        await().atMost(Duration.ofSeconds(30)).until(
+                () -> consume("order.cancelled"),
+                records -> records.stream().anyMatch(payload -> payload.contains(orderId)));
     }
 
     @Test
@@ -181,6 +196,49 @@ class OrderSagaIntegrationTest {
     }
 
     @Test
+    void anEventForAnUnknownOrderIsDeadLetteredRatherThanRetriedForever() {
+        // No order was ever placed with this id, and order-service writes the order in the same
+        // transaction that announces it - so this can never become valid, however long we retry.
+        String phantomOrderId = "phantom-" + DomainEvent.newEventId();
+
+        upstream.send("inventory.deducted", phantomOrderId, new InventoryDeductedEvent(
+                DomainEvent.newEventId(), phantomOrderId, "SKU-1001", 1, 99, Instant.now()));
+
+        DeadLetter dead = awaitDeadLetterFor(phantomOrderId);
+        assertThat(dead.originalTopic()).isEqualTo("inventory.deducted");
+        assertThat(dead.rootCauseType()).contains("PermanentEventException");
+    }
+
+    @Test
+    void aMalformedRecordIsDeadLetteredInsteadOfStallingThePartition() {
+        String marker = "not-json-" + DomainEvent.newEventId();
+
+        // No __TypeId__ header and a body that is not an event at all: deserialization fails
+        // before any handler runs. Without ErrorHandlingDeserializer this would throw inside the
+        // poll loop and the container would spin on this offset forever.
+        poison.send("inventory.deducted", "poison-key", marker);
+
+        await().atMost(Duration.ofSeconds(60)).untilAsserted(() ->
+                assertThat(rest.getForObject("/admin/dlq?limit=200", DeadLetter[].class))
+                        .anyMatch(letter -> letter.payload() != null && letter.payload().contains(marker)));
+    }
+
+    @Test
+    void deadLettersCanBeReplayedBackOntoTheirOriginalTopic() {
+        String phantomOrderId = "replay-" + DomainEvent.newEventId();
+
+        upstream.send("inventory.deducted", phantomOrderId, new InventoryDeductedEvent(
+                DomainEvent.newEventId(), phantomOrderId, "SKU-1001", 1, 99, Instant.now()));
+        awaitDeadLetterFor(phantomOrderId);
+
+        Map<?, ?> result = rest.postForObject("/admin/dlq/replay?limit=100", null, Map.class);
+
+        // Replay only reports what it moved; whether the records then succeed depends on whether
+        // the cause was actually fixed, which is the operator's problem, not the endpoint's.
+        assertThat((Integer) result.get("replayed")).isPositive();
+    }
+
+    @Test
     void invalidRequestsAreRejectedAtTheEdge() {
         ResponseEntity<String> response = rest.postForEntity(
                 "/orders",
@@ -198,6 +256,15 @@ class OrderSagaIntegrationTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         return response.getBody().orderId();
+    }
+
+    private DeadLetter awaitDeadLetterFor(String orderId) {
+        return await().atMost(Duration.ofSeconds(60)).until(
+                () -> Arrays.stream(rest.getForObject("/admin/dlq?limit=200", DeadLetter[].class))
+                        .filter(letter -> orderId.equals(letter.key()))
+                        .findFirst()
+                        .orElse(null),
+                Objects::nonNull);
     }
 
     private void awaitStatus(String orderId, OrderStatus expected) {

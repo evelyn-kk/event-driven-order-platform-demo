@@ -60,6 +60,7 @@ order's own state machine with no linear order to enforce.
 | **Compensation** | `order.cancelled` drives every rollback path: inventory releases its hold, payment refunds a completed charge |
 | **Contention on hot keys** | Stock reservation takes a `SELECT … FOR UPDATE` row lock rather than retrying an optimistic version, which collapses under a promoted SKU |
 | **Service data ownership** | payment-service copies the order amount from `order.created` instead of calling back into order-service, so no service needs another to be up |
+| **Poison pills** | Transient failures retry with capped exponential backoff; deterministic ones (`PermanentEventException`, malformed records) go straight to the DLQ instead of stalling a partition |
 
 ---
 
@@ -174,6 +175,33 @@ keeps per-order ordering intact as consumers scale out.
 
 ---
 
+## Failure handling
+
+A handler that throws is retried in place with exponential backoff (500 ms, doubling, capped at
+8 s, four attempts) and then dead-lettered. Retries block the partition, which is the deliberate
+choice here: every event for one order shares a partition, and non-blocking retry topics would let
+a later event overtake the one being retried. The backoff ceiling is what keeps the cost bounded.
+
+Failures that retrying cannot fix skip the backoff entirely — a `PermanentEventException`, or a
+record that could not be deserialized at all. Consumers wrap their deserializer in
+`ErrorHandlingDeserializer` so a malformed record surfaces as a failed record the handler can set
+aside; deserializing directly throws inside the poll loop, where nothing can recover it and the
+container spins on the same offset forever.
+
+Everything lands in one `order.events.dlq` with the original topic, partition, offset, and root
+cause in headers. Any service exposes:
+
+```bash
+curl "http://localhost:8081/admin/dlq?limit=20"          # what failed and why
+curl -X POST "http://localhost:8081/admin/dlq/replay"    # put it back once the cause is fixed
+```
+
+Replay commits its offsets only after the records are back on their original topics, so an
+interrupted replay repeats rather than skips — harmless, because consumers deduplicate on
+`eventId`.
+
+---
+
 ## Tests
 
 Integration tests run against real Postgres and Kafka via Testcontainers, so a Docker daemon must
@@ -219,7 +247,7 @@ Work in progress, in order:
 - [x] Consumer-side deduplication for effectively-once processing
 - [x] Inventory reservations with a compensating release
 - [x] Payment and shipping persistence
-- [ ] Tiered retry with exponential backoff, DLQ routing, and a replay endpoint
+- [x] Tiered retry with exponential backoff, DLQ routing, and a replay endpoint
 - [ ] Testcontainers coverage across every service
 - [ ] Micrometer → Prometheus → Grafana: consumer lag, end-to-end latency, throughput
 - [ ] Load-test harness and a documented tuning baseline

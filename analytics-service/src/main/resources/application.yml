@@ -2,21 +2,39 @@ spring:
   application:
     name: analytics-service
   kafka:
-    bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # No producer configured: this service only reads. Everything the platform publishes goes
+    # through the outbox in the service that owns the state being announced.
     consumer:
       group-id: ${spring.application.name}
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      enable-auto-commit: false
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: io.github.evelynkk.orderplatform.events
+    listener:
+      ack-mode: record
+      observation-enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      # Every series is labelled with its origin, so one Grafana panel can break a platform-wide
+      # metric down per service without a query per service.
+      service: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 server:
   port: 8086

@@ -34,6 +34,9 @@ spring:
         spring.json.trusted.packages: io.github.evelynkk.orderplatform.events
     listener:
       ack-mode: record
+      # Emits a per-listener timer, which is what separates "the broker is slow" from
+      # "our handler is slow" when end-to-end latency rises.
+      observation-enabled: true
 
 platform:
   outbox:
@@ -46,6 +49,24 @@ platform:
     backoff-multiplier: 2.0
     max-backoff-ms: 8000
     max-retries: 4
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      # Every series is labelled with its origin, so one Grafana panel can break a platform-wide
+      # metric down per service without a query per service.
+      service: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 server:
   port: 8082

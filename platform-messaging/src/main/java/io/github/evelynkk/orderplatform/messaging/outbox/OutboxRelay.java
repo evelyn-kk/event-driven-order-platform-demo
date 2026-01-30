@@ -1,5 +1,8 @@
 package io.github.evelynkk.orderplatform.messaging.outbox;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -49,15 +52,29 @@ public class OutboxRelay {
     private final TransactionTemplate transactionTemplate;
     private final DefaultKafkaProducerFactory<String, byte[]> producerFactory;
     private final KafkaTemplate<String, byte[]> kafkaTemplate;
+    private final Counter published;
+    private final Counter failed;
+    private final Timer drainTimer;
 
     public OutboxRelay(OutboxRepository repository,
                        OutboxProperties properties,
                        KafkaProperties kafkaProperties,
                        ObjectProvider<KafkaConnectionDetails> connectionDetails,
-                       PlatformTransactionManager transactionManager) {
+                       PlatformTransactionManager transactionManager,
+                       MeterRegistry registry) {
         this.repository = repository;
         this.properties = properties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.published = Counter.builder("platform.outbox.published")
+                .description("Outbox rows successfully published to Kafka")
+                .register(registry);
+        this.failed = Counter.builder("platform.outbox.publish.failed")
+                .description("Outbox publish attempts that failed and will be retried")
+                .register(registry);
+        this.drainTimer = Timer.builder("platform.outbox.drain")
+                .description("Time to claim and publish one batch of outbox rows")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(registry);
 
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, resolveBootstrapServers(kafkaProperties, connectionDetails));
@@ -91,7 +108,7 @@ public class OutboxRelay {
     @Scheduled(fixedDelayString = "${platform.outbox.poll-interval-ms:200}")
     public void drain() {
         for (int round = 0; round < properties.getMaxDrainRounds(); round++) {
-            Integer claimed = transactionTemplate.execute(status -> publishBatch());
+            Integer claimed = drainTimer.record(() -> transactionTemplate.execute(status -> publishBatch()));
             // A short batch means the backlog is drained; stop early instead of spinning.
             if (claimed == null || claimed < properties.getBatchSize()) {
                 return;
@@ -114,14 +131,16 @@ public class OutboxRelay {
             inFlight.add(kafkaTemplate.send(toRecord(message)));
         }
 
-        int published = 0;
+        int succeeded = 0;
         for (int i = 0; i < batch.size(); i++) {
             OutboxMessage message = batch.get(i);
             try {
                 inFlight.get(i).get(properties.getSendTimeoutMs(), TimeUnit.MILLISECONDS);
                 message.markPublished();
-                published++;
+                published.increment();
+                succeeded++;
             } catch (Exception e) {
+                failed.increment();
                 // Leave published_at null so the row is retried on a later pass. Dirty checking
                 // persists the incremented attempt count when this transaction commits.
                 message.markFailed(e.toString());
@@ -135,8 +154,8 @@ public class OutboxRelay {
             }
         }
 
-        if (published > 0) {
-            log.debug("Published {}/{} outbox rows", published, batch.size());
+        if (succeeded > 0) {
+            log.debug("Published {}/{} outbox rows", succeeded, batch.size());
         }
         return batch.size();
     }

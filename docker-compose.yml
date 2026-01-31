@@ -96,6 +96,37 @@ services:
     networks:
       - event-driven-order-platform-network
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: event-driven-order-platform-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      # Services run as jars on the host during development; this is how the container reaches them.
+      - "host.docker.internal:host-gateway"
+    networks:
+      - event-driven-order-platform-network
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: event-driven-order-platform-grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - event-driven-order-platform-network
+
 networks:
   event-driven-order-platform-network:
     driver: bridge

@@ -50,7 +50,10 @@ services:
     container_name: event-driven-order-platform-postgres
     hostname: postgres
     ports:
-      - "5432:5432"
+      # A locally installed Postgres on 5432 binds loopback and silently wins over the published
+      # container port, so the services connect to the wrong database and fail on a missing role.
+      # Set POSTGRES_HOST_PORT (and the matching POSTGRES_PORT for the services) to avoid it.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: platform
       POSTGRES_PASSWORD: platform
@@ -66,21 +69,6 @@ services:
     networks:
       - event-driven-order-platform-network
 
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.6.0
-    container_name: event-driven-order-platform-schema-registry
-    hostname: schema-registry
-    depends_on:
-      - kafka
-    ports:
-      - "8081:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-    networks:
-      - event-driven-order-platform-network
-
   # Optional: Kafka UI for observing messages and consumer groups
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
@@ -92,7 +80,6 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
     networks:
       - event-driven-order-platform-network
 

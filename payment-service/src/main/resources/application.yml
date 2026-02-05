@@ -1,22 +1,40 @@
 spring:
   application:
     name: payment-service
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/payment_service
+    username: ${POSTGRES_USER:platform}
+    password: ${POSTGRES_PASSWORD:platform}
+    hikari:
+      maximum-pool-size: 16
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/common,classpath:db/migration/payment
+
   kafka:
-    bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: ${spring.application.name}
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      enable-auto-commit: false
       properties:
         spring.json.trusted.packages: io.github.evelynkk.orderplatform.events
+    listener:
+      ack-mode: record
+
+platform:
+  outbox:
+    poll-interval-ms: 200
+    batch-size: 200
 
 server:
   port: 8083

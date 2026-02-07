@@ -85,7 +85,9 @@ public class OutboxRelay {
         // after a crash - which consumer-side dedup already covers.
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
+        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, properties.getCompressionType());
+        config.put(ProducerConfig.LINGER_MS_CONFIG, properties.getLingerMs());
+        config.put(ProducerConfig.BATCH_SIZE_CONFIG, properties.getBatchSizeBytes());
         this.producerFactory = new DefaultKafkaProducerFactory<>(config);
         this.kafkaTemplate = new KafkaTemplate<>(producerFactory);
     }

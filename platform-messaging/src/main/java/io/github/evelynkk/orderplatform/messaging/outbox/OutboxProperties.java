@@ -26,4 +26,19 @@ public class OutboxProperties {
 
     /** Attempt count past which a stuck row is logged as an error rather than a warning. */
     private int alertAfterAttempts = 5;
+
+    /**
+     * How long the producer waits to fill a batch before sending.
+     *
+     * <p>Zero sends every record on its own, paying a broker round trip per event. A few
+     * milliseconds costs latency the outbox has already spent waiting for its poll tick, and buys
+     * batching across the whole drain.
+     */
+    private int lingerMs = 5;
+
+    /** Bytes per producer batch. Raising it lets a linger window pack more records per request. */
+    private int batchSizeBytes = 64 * 1024;
+
+    /** Events are JSON and compress well; lz4 trades a little CPU for a smaller network payload. */
+    private String compressionType = "lz4";
 }

@@ -9,7 +9,9 @@ spring:
     hikari:
       # The listener container threads and the outbox relay all draw from this pool; sizing it
       # below the number of concurrent consumers would make them queue on connections.
-      maximum-pool-size: 16
+      # Must exceed the listener threads plus the relay, or handlers queue on
+      # connections and the extra consumer parallelism is wasted.
+      maximum-pool-size: 32
 
   jpa:
     # Flyway owns the schema. Hibernate only checks that the mapping still matches it, so a
@@ -45,14 +47,22 @@ spring:
         spring.json.trusted.packages: io.github.evelynkk.orderplatform.events
     listener:
       ack-mode: record
+      # Three threads per listener, not the six that would match the partition count. Matching
+      # partitions is the textbook move, but every service multiplies it by its listener count, and
+      # oversubscribing the CPU costs more than the extra parallelism returns.
+      concurrency: 3
       # Emits a per-listener timer, which is what separates "the broker is slow" from
       # "our handler is slow" when end-to-end latency rises.
       observation-enabled: true
 
 platform:
   outbox:
-    poll-interval-ms: 200
-    batch-size: 200
+    # The saga crosses the outbox four times, so each tick of this interval is paid four times
+    # over in end-to-end latency.
+    poll-interval-ms: 50
+    batch-size: 500
+    linger-ms: 5
+    batch-size-bytes: 65536
 
   dlq:
     topic: order.events.dlq

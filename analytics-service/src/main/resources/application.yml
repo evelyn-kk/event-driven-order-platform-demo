@@ -16,6 +16,9 @@ spring:
         spring.json.trusted.packages: io.github.evelynkk.orderplatform.events
     listener:
       ack-mode: record
+      # Left at one. These services only log, so parallelism here buys nothing and takes CPU from
+      # the fulfillment path, which is what customers actually wait on.
+      concurrency: 1
       observation-enabled: true
 
 management:

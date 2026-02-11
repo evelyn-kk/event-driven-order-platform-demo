@@ -24,9 +24,13 @@ spring:
       group-id: ${spring.application.name}
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Wrapping the JSON deserializer means a malformed record surfaces as a failed record the
+      # error handler can dead-letter. Deserializing directly throws inside the poll loop, where
+      # nothing can recover it and the container spins on the same offset forever.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       enable-auto-commit: false
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: io.github.evelynkk.orderplatform.events
     listener:
       ack-mode: record
@@ -35,6 +39,13 @@ platform:
   outbox:
     poll-interval-ms: 200
     batch-size: 200
+
+  dlq:
+    topic: order.events.dlq
+    initial-backoff-ms: 500
+    backoff-multiplier: 2.0
+    max-backoff-ms: 8000
+    max-retries: 4
 
 server:
   port: 8083

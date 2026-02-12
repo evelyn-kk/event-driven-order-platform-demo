@@ -1,5 +1,7 @@
 package io.github.evelynkk.orderplatform.messaging.idempotency;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
@@ -23,11 +25,14 @@ public class IdempotentEventProcessor {
 
     private final ProcessedEventRepository repository;
     private final TransactionTemplate transactionTemplate;
+    private final MeterRegistry registry;
 
     public IdempotentEventProcessor(ProcessedEventRepository repository,
-                                    PlatformTransactionManager transactionManager) {
+                                    PlatformTransactionManager transactionManager,
+                                    MeterRegistry registry) {
         this.repository = repository;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.registry = registry;
     }
 
     /**
@@ -51,14 +56,32 @@ public class IdempotentEventProcessor {
             });
             if (Boolean.FALSE.equals(executed)) {
                 log.debug("Skipped duplicate delivery: eventId={}, group={}", eventId, consumerGroup);
+                count(consumerGroup, "duplicate");
+                return false;
             }
-            return Boolean.TRUE.equals(executed);
+            count(consumerGroup, "applied");
+            return true;
         } catch (DataIntegrityViolationException duplicate) {
             // Another thread or instance claimed the same event and committed first. Its
             // transaction did the work; ours rolled back cleanly. Nothing left to do.
             log.debug("Lost the race on a concurrent duplicate: eventId={}, group={}",
                     eventId, consumerGroup);
+            count(consumerGroup, "duplicate");
             return false;
         }
+    }
+
+    /**
+     * A steadily non-zero duplicate rate is worth seeing. It usually means consumers are being
+     * rebalanced, or a producer is republishing — both invisible from throughput alone, because
+     * duplicates look like healthy traffic until you separate them out.
+     */
+    private void count(String consumerGroup, String outcome) {
+        Counter.builder("platform.events.processed")
+                .description("Events handled, split by whether the work actually ran")
+                .tag("group", consumerGroup)
+                .tag("outcome", outcome)
+                .register(registry)
+                .increment();
     }
 }

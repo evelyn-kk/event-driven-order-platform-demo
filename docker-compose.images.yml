@@ -50,21 +50,6 @@ services:
         wait
       "
 
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.6.0
-    container_name: event-driven-order-platform-schema-registry
-    hostname: schema-registry
-    depends_on:
-      - kafka
-    ports:
-      - "8081:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-    networks:
-      - event-driven-order-platform-network
-
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
     container_name: event-driven-order-platform-ui
@@ -75,7 +60,6 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
     networks:
       - event-driven-order-platform-network
 

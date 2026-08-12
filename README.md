@@ -1,6 +1,6 @@
 # Event-Driven Order Platform
 
-![CI](https://github.com/evelyn-kk/event-driven-order-platform/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/evelyn-kk/event-driven-order-platform-demo/actions/workflows/ci.yml/badge.svg)
 
 An e-commerce order fulfillment platform built as a **choreographed saga** over Apache Kafka. Six
 Spring Boot services coordinate one order lifecycle with no synchronous calls between them — every

@@ -1,6 +1,6 @@
 # 事件驱动订单平台
 
-![CI](https://github.com/evelyn-kk/event-driven-order-platform/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/evelyn-kk/event-driven-order-platform-demo/actions/workflows/ci.yml/badge.svg)
 
 [English](README.md) · 简体中文
 

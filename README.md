@@ -1,6 +1,6 @@
 # Event-Driven Order Platform
 
-![CI](https://github.com/evelyn-kk/event-driven-order-platform/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/evelyn-kk/event-driven-order-platform-demo/actions/workflows/ci.yml/badge.svg)
 
 English · [简体中文](README.zh-CN.md)
 
